@@ -2,12 +2,13 @@
 # Script that will transform the data into frames that will be visualised
 
 import pandas as pd
-import numpy as np
 
 
 # This method will be called from main
 def run_manipulation(data, start_year, end_year):
-    assign_victories(data, start_year, end_year)
+    results_stats = assign_victories(data, start_year, end_year)
+
+    return results_stats
 
 
 # Method to create an empty DataFrame
@@ -31,8 +32,6 @@ def select_between_dates(data, start_date, end_date):
 # games. wins. losses and draws for each country in a given time period between 1872 and 2019
 def assign_victories(data, start_date, end_date):
     # Test print
-    print(data)
-    print(data.dtypes)
 
     # New empty data frame
     results_assigned = pd.DataFrame(
@@ -58,6 +57,10 @@ def assign_victories(data, start_date, end_date):
         ('away_games', int),
         ('neutral_games', int),
         ('total_games', int),
+        ('percent_wins', float),
+        ('percent_home_wins', float),
+        ('percent_away_wins', float),
+        ('percent_neutral_wins', float)
     ]
     results_assigned = create_empty_DataFrame(columns, 'id')
 
@@ -141,6 +144,16 @@ def assign_victories(data, start_date, end_date):
         results_assigned.at[country_id, 'neutral_losses'] = neutral_losses
         results_assigned.at[country_id, 'neutral_draws'] = neutral_draws
 
+        # Assign the percentages
+        results_assigned.at[country_id, 'percent_wins'] = (neutral_wins + away_wins + home_wins) / \
+                                                          (home_games + away_games + neutral_games)
+        if home_games != 0:
+            results_assigned.at[country_id, 'percent_home_wins'] = home_wins / home_games
+        if away_games != 0:
+            results_assigned.at[country_id, 'percent_away_wins'] = away_wins / away_games
+        if neutral_games != 0:
+            results_assigned.at[country_id, 'percent_neutral_wins'] = neutral_wins / neutral_games
+
         country_id = country_id + 1
 
     # Sort results alphabetically and reset indices
@@ -149,4 +162,3 @@ def assign_victories(data, start_date, end_date):
     print(results_assigned)
 
     return results_assigned
-
