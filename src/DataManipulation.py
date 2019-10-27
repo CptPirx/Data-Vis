@@ -1,7 +1,9 @@
 # Data Manipulator
 # Script that will transform the data into frames that will be visualised
 
+import LoadData as DataLoader
 import pandas as pd
+import numpy as np
 
 
 # This method will be called from main
@@ -145,14 +147,18 @@ def assign_victories(data, start_date, end_date):
         results_assigned.at[country_id, 'neutral_draws'] = neutral_draws
 
         # Assign the percentages
-        results_assigned.at[country_id, 'percent_wins'] = (neutral_wins + away_wins + home_wins) / \
-                                                          (home_games + away_games + neutral_games)
-        if home_games != 0:
-            results_assigned.at[country_id, 'percent_home_wins'] = home_wins / home_games
-        if away_games != 0:
-            results_assigned.at[country_id, 'percent_away_wins'] = away_wins / away_games
-        if neutral_games != 0:
-            results_assigned.at[country_id, 'percent_neutral_wins'] = neutral_wins / neutral_games
+        total_wins = neutral_wins + away_wins + home_wins
+        results_assigned.at[country_id, 'percent_wins'] = np.round(total_wins /
+                                                                   (home_games + away_games + neutral_games), 3)
+
+        if total_wins != 0:
+            results_assigned.at[country_id, 'percent_home_wins'] = np.round(home_wins / total_wins, 3)
+            results_assigned.at[country_id, 'percent_away_wins'] = np.round(away_wins / total_wins, 3)
+            results_assigned.at[country_id, 'percent_neutral_wins'] = np.round(neutral_wins / total_wins, 3)
+        else:
+            results_assigned.at[country_id, 'percent_home_wins'] = 0
+            results_assigned.at[country_id, 'percent_away_wins'] = 0
+            results_assigned.at[country_id, 'percent_neutral_wins'] = 0
 
         country_id = country_id + 1
 
@@ -160,5 +166,7 @@ def assign_victories(data, start_date, end_date):
     results_assigned = results_assigned.sort_values('country')
     results_assigned = results_assigned.reset_index(drop=True)
     print(results_assigned)
+
+    DataLoader.save_to_sql(results_assigned)
 
     return results_assigned
