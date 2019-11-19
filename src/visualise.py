@@ -1,114 +1,77 @@
 # Visualise
 # This script will be responsible for visualising the dataframes it receives
 
-import pandas as pd
-import geopandas as gpd
 import altair as alt
-import vega_datasets
-import json
 
 
-def gen_map(geodata, color_column, title, tooltip, color_scheme='bluegreen'):
-    '''
+def gen_charts(data, color_scheme='bluegreen'):
+    """
+
+    :param color_column:
+    :param title:
+    :param tooltip_map:
+    :param color_scheme:
+    :return:
+    """
+
+    """
     Generates world map
-    '''
+    """
 
-    selection = alt.selection_multi(fields=[color_column])
-    color = alt.condition(selection,
-                          alt.Color(color_column, type='nominal',
-                                    scale=alt.Scale(scheme=color_scheme)),
-                          alt.value('lightgray'))
+    tooltip_map = ['properties.country:O', 'properties.percent_wins:Q']
+    selector = alt.selection_multi()
 
     # Add Base Layer
-    base = alt.Chart(geodata, title=title).mark_geoshape(
+    base = alt.Chart(data, title='Percentage of home wins', width=1080).mark_geoshape(
         stroke='black',
         strokeWidth=1
     ).encode(
     ).properties(
-        width=800,
-        height=800
+        width=1000,
+        height=1000
     )
+
     # Add Choropleth Layer
-    choro = alt.Chart(geodata).mark_geoshape(
+    choro = alt.Chart(data).mark_geoshape(
         fill='lightgray',
         stroke='black'
     ).encode(
-        color=color,
-        tooltip=tooltip
-    ).add_selection(
-        selection
+        color=alt.condition(selector,
+                            alt.Color('properties.percent_wins', type='nominal',
+                                      scale=alt.Scale(scheme=color_scheme)),
+                            alt.value('lightgray')),
+        tooltip=tooltip_map
+    ).add_selection(selector)
+
+    map = base + choro
+
+    """ 
+    Generate time chart
+    """
+    tooltip_timeline = ['properties.country:O', 'properties.games:Q']
+    brush = alt.selection_interval(encodings=['x'], empty='none')
+
+    timeline = alt.Chart(data, width=1080).mark_area(opacity=0.3).encode(
+        x='properties.date:Q',
+        y=alt.Y('properties.games:Q'),
+        color=alt.Color('properties.country:N', scale=alt.Scale(scheme=color_scheme)),
+        tooltip=tooltip_timeline
+    ).transform_filter(
+        selector
     )
-    return base + choro
+
+    return alt.vconcat(map, timeline)
 
 
-def gen_comparison(geodata, color_column, title, tooltip, color_scheme='bluegreen'):
+def visualise_results(geodata):
     """
 
+    :param geodata:
+    :param data:
+    :return:
     """
 
-    brush = alt.selection_interval()  # selection of type "interval"
-
-    chart = alt.Chart(geodata).mark_point().encode(
-        y='percent_wins:Q',
-        color=alt.condition(brush, 'name:O', alt.value('lightgray'))
-    ).properties(
-        width=250,
-        height=250
-    ).add_selection(
-        brush
-    )
-
-    chart.encode(x='percent_home_wins:Q')
-
-    return chart
-
-
-def open_geojson(geo_json_file_loc):
-    with open(geo_json_file_loc) as json_data:
-        d = json.load(json_data)
-    return d
-
-
-def get_gpd_df(geo_json_file_loc):
-    toronto_json = open_geojson(geo_json_file_loc)
-    gdf = gpd.GeoDataFrame.from_features((toronto_json))
-    return gdf
-
-
-def visualise_results(data):
-    data = data[(data['total_games'] >= 0)]
-
-    geo_json_file_loc = 'D:/OneDrive/Aarhus/Semestr 3/Data Visualization/Project/Data/custom.geo.json'
-
-    gdf = get_gpd_df(geo_json_file_loc)
-
-    # Sort results alphabetically and reset indices
-    gdf = gdf.sort_values('name')
-    gdf = gdf.reset_index(drop=True)
-
-    # Manually fixing few countries
-    data.loc[data['country'].str.contains('China'), 'country'] = 'China'
-    data.loc[data['country'].str.contains('Czech'), 'country'] = 'Czech Rep.'
-    data.loc[data['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
-    data.loc[data['country'].str.contains('Central Africa'), 'country'] \
-        = 'Central African Rep.'
-
-    gdf = gdf.merge(data, left_on='name', right_on='country', how='inner')
-    choro_json = json.loads(gdf.to_json())
-    choro_data = alt.Data(values=choro_json['features'])
-
-    map_chart = gen_map(geodata=choro_data,
-                        color_column='properties.percent_wins',
-                        title=f'Percentage of home wins',
-                        tooltip=['properties.country:O', 'properties.percent_wins:Q'],
+    charts = gen_charts(data=geodata,
                         color_scheme='yelloworangered')
-
-    slider_chart = gen_comparison(geodata=choro_data,
-                                  color_column='properties.percent_home_wins',
-                                  title=f'Percentage of home wins',
-                                  tooltip=['properties.country:O', 'properties.percent_home_wins:Q'],
-                                  color_scheme='yelloworangered')
-
-    charts = alt.vconcat(map_chart, slider_chart)
 
     charts.serve()

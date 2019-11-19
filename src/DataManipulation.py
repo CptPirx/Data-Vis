@@ -3,14 +3,33 @@
 
 import LoadData as DataLoader
 import pandas as pd
+import geopandas as gpd
 import numpy as np
+import altair as alt
+import json
 
 
 # This method will be called from main
-def run_manipulation(data, start_year, end_year):
-    results_stats = assign_victories(data, start_year, end_year)
+def run_manipulation(results, regions, start_year, end_year):
+    stat_data = assign_victories(results, regions, start_year, end_year)
+    time_data = to_history_chart(results)
 
-    return results_stats
+    # Manually fixing a few countries
+    stat_data.loc[stat_data['country'].str.contains('China'), 'country'] = 'China'
+    stat_data.loc[stat_data['country'].str.contains('Czech'), 'country'] = 'Czech Rep.'
+    stat_data.loc[stat_data['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
+    stat_data.loc[stat_data['country'].str.contains('Central Africa'), 'country'] \
+        = 'Central African Rep.'
+
+    time_data.loc[time_data['country'].str.contains('China'), 'country'] = 'China'
+    time_data.loc[time_data['country'].str.contains('Czech'), 'country'] = 'Czech Rep.'
+    time_data.loc[time_data['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
+    time_data.loc[time_data['country'].str.contains('Central Africa'), 'country'] \
+        = 'Central African Rep.'
+
+    data = for_altair(stat_data, time_data)
+
+    return data
 
 
 # Method to create an empty DataFrame
@@ -25,6 +44,13 @@ def create_empty_DataFrame(columns, index_col):
 
 # Method to select games between specific dates. Dates are in format 'yyyy-mm-dd'
 def select_between_dates(data, start_date, end_date):
+    """
+
+    :param data:
+    :param start_date:
+    :param end_date:
+    :return:
+    """
     mask = (data['date'] > start_date) & (data['date'] <= end_date)
     data = data.loc[mask]
     return data
@@ -32,17 +58,15 @@ def select_between_dates(data, start_date, end_date):
 
 # This method will create a data frame that assigns number of
 # games. wins. losses and draws for each country in a given time period between 1872 and 2019
-def assign_victories(data, start_date, end_date):
-    # Test print
+def assign_victories(data, regions, start_date, end_date):
+    """
 
-    # New empty data frame
-    results_assigned = pd.DataFrame(
-        columns=['country',
-                 'wins', 'home_wins', 'away_wins', 'neutral_wins',
-                 'draws', 'home_draws', 'away_draws', 'neutral_draws',
-                 'losses', 'home_losses', 'away_losses', 'neutral_losses',
-                 'home_games', 'away_games', 'neutral_games'])
-
+    :param data:
+    :param regions:
+    :param start_date:
+    :param end_date:
+    :return:
+    """
     columns = [
         ('id', str),
         ('country', str),
@@ -149,12 +173,12 @@ def assign_victories(data, start_date, end_date):
         # Assign the percentages
         total_wins = neutral_wins + away_wins + home_wins
         results_assigned.at[country_id, 'percent_wins'] = np.round(total_wins /
-                                                                   (home_games + away_games + neutral_games), 3)
+                                                                   (home_games + away_games + neutral_games), 2)
 
         if total_wins != 0:
-            results_assigned.at[country_id, 'percent_home_wins'] = np.round(home_wins / total_wins, 3)
-            results_assigned.at[country_id, 'percent_away_wins'] = np.round(away_wins / total_wins, 3)
-            results_assigned.at[country_id, 'percent_neutral_wins'] = np.round(neutral_wins / total_wins, 3)
+            results_assigned.at[country_id, 'percent_home_wins'] = np.round(home_wins / total_wins, 2)
+            results_assigned.at[country_id, 'percent_away_wins'] = np.round(away_wins / total_wins, 2)
+            results_assigned.at[country_id, 'percent_neutral_wins'] = np.round(neutral_wins / total_wins, 2)
         else:
             results_assigned.at[country_id, 'percent_home_wins'] = 0
             results_assigned.at[country_id, 'percent_away_wins'] = 0
@@ -165,8 +189,114 @@ def assign_victories(data, start_date, end_date):
     # Sort results alphabetically and reset indices
     results_assigned = results_assigned.sort_values('country')
     results_assigned = results_assigned.reset_index(drop=True)
-    print(results_assigned)
 
-    DataLoader.save_to_sql(results_assigned)
+    # Manually fixing few countries
+    # print(regions.loc[regions['ShortName'].str.contains('Korea')])
+    # print(results_assigned.loc[results_assigned['country'].str.contains('Korea')])
+
+    results_assigned.loc[results_assigned['country'].str.contains('China'), 'country'] = 'China'
+    results_assigned.loc[results_assigned['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
+    results_assigned.loc[results_assigned['country'].str.contains('Republic of Ireland'), 'country'] = 'Ireland'
+    regions.loc[regions['ShortName'].str.contains('Slovak'), 'ShortName'] = 'Slovakia'
+    regions.loc[regions['ShortName'].str.contains('Ivoir'), 'ShortName'] = 'Ivory Coast'
+    regions.loc[(regions['ShortName'].str.contains('Korea')) & (regions['IncomeGroup'].str.contains('OECD')),
+                'ShortName'] = 'South Korea'
+
+    results_assigned = pd.merge(results_assigned, regions, how='inner', left_on=['country'], right_on=['ShortName'])
+
+    DataLoader.save_to_sql(results_assigned, "results_assigned")
 
     return results_assigned
+
+
+def to_history_chart(data):
+    """
+
+    :param data:
+    :return:
+    """
+
+    data['date'] = data['date'].dt.year
+
+    # Calculate number of home and away games for each year
+    home_games = pd.crosstab(data.date, data.home_team)
+    away_games = pd.crosstab(data.date, data.away_team)
+
+    # Add those two values for number of total games per year
+    time_stats = home_games.add(away_games, fill_value=0)
+
+    # Change to 'classic' dataframe
+    time_stats = time_stats.stack().reset_index()
+    time_stats.columns = ['date', 'country', 'games']
+
+    return time_stats
+
+
+def for_altair(stat_data, time_data):
+    """
+
+    :param stat_data:
+    :param time_data:
+    :return:
+    """
+    print(time_data)
+    print(stat_data)
+
+    # Merge the (x, y) metadata into the long-form view
+    data = pd.merge(time_data, stat_data, on='country')
+
+    print(data)
+
+    DataLoader.save_to_sql(data, "final_data")
+
+    return data
+
+
+def open_geojson(geo_json_file_loc):
+    """
+
+    :param geo_json_file_loc:
+    :return:
+    """
+    with open(geo_json_file_loc) as json_data:
+        d = json.load(json_data)
+    return d
+
+
+def get_gpd_df(geo_json_file_loc):
+    """
+
+    :param geo_json_file_loc:
+    :return:
+    """
+    toronto_json = open_geojson(geo_json_file_loc)
+    gdf = gpd.GeoDataFrame.from_features((toronto_json))
+    return gdf
+
+
+def get_geodata():
+    """
+
+    :return:
+    """
+    geo_json_file_loc = 'D:/OneDrive/Aarhus/Semestr 3/Data Visualization/Project/Data/custom.geo.json'
+
+    gdf = get_gpd_df(geo_json_file_loc)
+
+    # Sort results alphabetically and reset indices
+    gdf = gdf.sort_values('name')
+    gdf = gdf.reset_index(drop=True)
+
+    return gdf
+
+
+def merge_geodata(data):
+    # Create the geospacial data
+    gdf = get_geodata()
+    gdf = gdf.merge(data, left_on='name', right_on='country', how='inner')
+
+    # Convert the geodata to json
+    choro_json = json.loads(gdf.to_json())
+    final_geo_data = alt.Data(values=choro_json['features'])
+
+    return final_geo_data
