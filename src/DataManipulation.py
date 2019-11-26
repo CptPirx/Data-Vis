@@ -7,33 +7,46 @@ import geopandas as gpd
 import numpy as np
 import altair as alt
 import json
+import pycountry
 
 
-# This method will be called from main
 def run_manipulation(results, regions, start_year, end_year):
+    """
+    This method will be called from main
+    :param results:
+    :param regions:
+    :param start_year:
+    :param end_year:
+    :return:
+    """
     stat_data = assign_victories(results, regions, start_year, end_year)
     time_data = to_history_chart(results)
 
     # Manually fixing a few countries
-    stat_data.loc[stat_data['country'].str.contains('China'), 'country'] = 'China'
-    stat_data.loc[stat_data['country'].str.contains('Czech'), 'country'] = 'Czech Rep.'
-    stat_data.loc[stat_data['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
-    stat_data.loc[stat_data['country'].str.contains('Central Africa'), 'country'] \
-        = 'Central African Rep.'
+    time_data.loc[time_data['country'].str.contains('China'), 'country'] = 'China'
+    stat_data.loc[stat_data['country'].str.contains('Brunei'), 'country'] = 'Brunei Darussalam '
+    stat_data.loc[stat_data['country'].str.contains('DR Congo'), 'country'] = 'Congo, The Democratic Republic of the'
+    stat_data.loc[stat_data['country'].str.contains('Ivory'), 'country'] = 'Côte d\'Ivoire'
+    stat_data.loc[stat_data['country'].str.contains('South Korea'), 'country'] = 'Korea, Republic of'
 
     time_data.loc[time_data['country'].str.contains('China'), 'country'] = 'China'
-    time_data.loc[time_data['country'].str.contains('Czech'), 'country'] = 'Czech Rep.'
-    time_data.loc[time_data['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
-    time_data.loc[time_data['country'].str.contains('Central Africa'), 'country'] \
-        = 'Central African Rep.'
+    time_data.loc[time_data['country'].str.contains('Brunei'), 'country'] = 'Brunei Darussalam '
+    time_data.loc[time_data['country'].str.contains('DR Congo'), 'country'] = 'Congo, The Democratic Republic of the'
+    time_data.loc[time_data['country'].str.contains('Ivory'), 'country'] = 'Côte d\'Ivoire'
+    time_data.loc[time_data['country'].str.contains('South Korea'), 'country'] = 'Korea, Republic of'
 
     data = for_altair(stat_data, time_data)
 
     return data
 
 
-# Method to create an empty DataFrame
 def create_empty_DataFrame(columns, index_col):
+    """
+    Method to create an empty DataFrame
+    :param columns:
+    :param index_col:
+    :return:
+    """
     index_type = next((t for name, t in columns if name == index_col))
     df = pd.DataFrame({name: pd.Series(dtype=t) for name, t in columns if name != index_col},
                       index=pd.Index([], dtype=index_type))
@@ -42,10 +55,9 @@ def create_empty_DataFrame(columns, index_col):
     return df[cols]
 
 
-# Method to select games between specific dates. Dates are in format 'yyyy-mm-dd'
 def select_between_dates(data, start_date, end_date):
     """
-
+    Method to select games between specific dates. Dates are in format 'yyyy-mm-dd'
     :param data:
     :param start_date:
     :param end_date:
@@ -56,11 +68,10 @@ def select_between_dates(data, start_date, end_date):
     return data
 
 
-# This method will create a data frame that assigns number of
-# games. wins. losses and draws for each country in a given time period between 1872 and 2019
 def assign_victories(data, regions, start_date, end_date):
     """
-
+    This method will create a data frame that assigns number of
+    games. wins. losses and draws for each country in a given time period between 1872 and 2019
     :param data:
     :param regions:
     :param start_date:
@@ -69,6 +80,7 @@ def assign_victories(data, regions, start_date, end_date):
     """
     columns = [
         ('id', str),
+        ('date', str),
         ('country', str),
         ('home_wins', int),
         ('away_wins', int),
@@ -190,10 +202,6 @@ def assign_victories(data, regions, start_date, end_date):
     results_assigned = results_assigned.sort_values('country')
     results_assigned = results_assigned.reset_index(drop=True)
 
-    # Manually fixing few countries
-    # print(regions.loc[regions['ShortName'].str.contains('Korea')])
-    # print(results_assigned.loc[results_assigned['country'].str.contains('Korea')])
-
     results_assigned.loc[results_assigned['country'].str.contains('China'), 'country'] = 'China'
     results_assigned.loc[results_assigned['country'].str.contains('DR Congo'), 'country'] = 'Dem. Rep. Congo'
     results_assigned.loc[results_assigned['country'].str.contains('Republic of Ireland'), 'country'] = 'Ireland'
@@ -245,7 +253,17 @@ def for_altair(stat_data, time_data):
     # Merge the (x, y) metadata into the long-form view
     data = pd.merge(time_data, stat_data, on='country')
 
-    print(data)
+    for index, row in data.iterrows():
+        country = pycountry.countries.get(name=data.loc[index, 'country'])
+        if country is not None:
+            data.loc[index, 'CountryCode'] = country.numeric
+        else:
+            country = pycountry.countries.search_fuzzy(data.loc[index, 'country'])
+            data.loc[index, 'CountryCode'] = country[0].numeric
+
+    # data = pd.melt(data, id_vars=["date_x", "country"])
+
+    # print(data)
 
     DataLoader.save_to_sql(data, "final_data")
 
@@ -291,7 +309,11 @@ def get_geodata():
 
 
 def merge_geodata(data):
-    # Create the geospacial data
+    """
+    Create the geospacial data
+    :param data:
+    :return:
+    """
     gdf = get_geodata()
     gdf = gdf.merge(data, left_on='name', right_on='country', how='inner')
 

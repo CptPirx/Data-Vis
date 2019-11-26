@@ -2,76 +2,129 @@
 # This script will be responsible for visualising the dataframes it receives
 
 import altair as alt
+import pandas as pd
+import panel as pn
+import datetime as dt
 
 
-def gen_charts(data, color_scheme='bluegreen'):
+def gen_charts(data, geodata, color_scheme='bluegreen'):
     """
 
-    :param color_column:
-    :param title:
-    :param tooltip_map:
+    :param data:
     :param color_scheme:
     :return:
     """
+    alt.data_transformers.disable_max_rows()
+
+    map_json = alt.topo_feature('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json', 'countries')
+
+    tooltip_timeline = ['country:N', 'games:Q', 'date_x:Q']
+    brush = alt.selection_interval(encodings=['x'], empty='all')
+
+    tooltip_map = ['country:N', 'percent_wins:Q']
+    selector = alt.selection_multi(fields=['country'], empty='all')
 
     """
     Generates world map
     """
 
-    tooltip_map = ['properties.country:O', 'properties.percent_wins:Q']
-    selector = alt.selection_multi()
-
     # Add Base Layer
-    base = alt.Chart(data, title='Percentage of home wins', width=1080).mark_geoshape(
+    base = alt.Chart(map_json).mark_geoshape(
         stroke='black',
         strokeWidth=1
     ).encode(
-    ).properties(
-        width=1000,
-        height=1000
-    )
-
-    # Add Choropleth Layer
-    choro = alt.Chart(data).mark_geoshape(
-        fill='lightgray',
-        stroke='black'
-    ).encode(
-        color=alt.condition(selector,
-                            alt.Color('properties.percent_wins', type='nominal',
-                                      scale=alt.Scale(scheme=color_scheme)),
+        color=alt.condition(selector, alt.Color('percent_wins:Q',
+                                                scale=alt.Scale(scheme=color_scheme)),
                             alt.value('lightgray')),
         tooltip=tooltip_map
-    ).add_selection(selector)
+    ).transform_lookup(
+        lookup='id',
+        from_=alt.LookupData(data, 'CountryCode', ['country', 'percent_wins'])
+    ).properties(
+        width=800,
+        height=600
+    ).add_selection(
+        selector
+    )
 
-    map = base + choro
+    map = base.project('equirectangular')
 
     """ 
-    Generate time chart
+    Generate timeline
     """
-    tooltip_timeline = ['properties.country:O', 'properties.games:Q']
-    brush = alt.selection_interval(encodings=['x'], empty='none')
 
-    timeline = alt.Chart(data, width=1080).mark_area(opacity=0.3).encode(
-        x='properties.date:Q',
-        y=alt.Y('properties.games:Q'),
-        color=alt.Color('properties.country:N', scale=alt.Scale(scheme=color_scheme)),
+    timeline = alt.Chart(data).mark_area(opacity=0.3).encode(
+        x='date_x:Q',
+        y=alt.Y('games:Q', stack=False),
+        color=alt.condition(brush, 'country:N', alt.value('lightgrey')),
         tooltip=tooltip_timeline
+    ).properties(
+        width=1000
+    ).add_selection(
+        brush
     ).transform_filter(
         selector
     )
 
-    return alt.vconcat(map, timeline)
+    """
+    Generate the side bar charts
+    """
+
+    data = pd.melt(data, id_vars=['country', 'date_x'], value_vars=['percent_home_wins',
+                                                                    'percent_away_wins',
+                                                                    'percent_neutral_wins'],
+                   var_name='statistics',
+                   value_name='values')
+
+    left_bar = alt.Chart(data).mark_bar().encode(
+        x='statistics:N',
+        y=alt.Y('values:Q'),
+        color='statistics:N',
+        column='country:N'
+    ).transform_filter(
+        selector
+    )
+
+    """
+    Return all charts 
+    """
+    return alt.vconcat(map,
+                       left_bar,
+
+                       title="International football results")
 
 
-def visualise_results(geodata):
+def visualise_results(data, geodata):
     """
 
     :param geodata:
-    :param data:
     :return:
     """
 
-    charts = gen_charts(data=geodata,
+    # """
+    # Create the dashboard
+    # """
+    #
+    # pn.extension('vega')
+    #
+    # title = '  ### Stock Price Dashboard'
+    # subtitle = 'This dashboard allows you to select a company and date range to see stock prices.'
+    #
+    # @pn.depends()
+    # def get_plot():
+    #     # create the Altair chart object
+    #     charts = gen_charts(data=data,
+    #                         geodata=geodata,
+    #                         color_scheme='yelloworangered')
+    #
+    #     return charts
+
+    charts = gen_charts(data=data,
+                        geodata=geodata,
                         color_scheme='yelloworangered')
 
     charts.serve()
+
+    # dashboard = pn.Row(pn.Column(title, subtitle), get_plot)
+    #
+    # dashboard.show()

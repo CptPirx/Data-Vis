@@ -6,6 +6,10 @@ import pandas as pd
 
 
 def load_from_sql():
+    """
+
+    :return:
+    """
     # Create SQL engine and establish a connection
     sql_engine = sqlalchemy.create_engine('mysql+pymysql://root:Eregion12!@127.0.0.1', pool_recycle=3600)
 
@@ -32,6 +36,12 @@ def load_from_sql():
 
 
 def save_to_sql(data, table_name):
+    """
+
+    :param data:
+    :param table_name:
+    :return:
+    """
     # Create SQL engine and establish a connection
     sql_engine = sqlalchemy.create_engine('mysql+pymysql://root:Eregion12!@127.0.0.1/football_ressults', pool_recycle=3600)
 
