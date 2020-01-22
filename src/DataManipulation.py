@@ -6,8 +6,8 @@ import pandas as pd
 import geopandas as gpd
 import numpy as np
 import altair as alt
-import json
 import pycountry
+import urllib.request, json
 
 
 def run_manipulation(results, regions, start_year, end_year):
@@ -19,23 +19,16 @@ def run_manipulation(results, regions, start_year, end_year):
     :param end_year:
     :return:
     """
-    stat_data = assign_victories(results, regions, start_year, end_year)
-    time_data = to_history_chart(results)
+    stat_data = prepare_data(results, regions)
 
     # Manually fixing a few countries
-    time_data.loc[time_data['country'].str.contains('China'), 'country'] = 'China'
+    stat_data.loc[stat_data['country'].str.contains('China'), 'country'] = 'China'
     stat_data.loc[stat_data['country'].str.contains('Brunei'), 'country'] = 'Brunei Darussalam '
     stat_data.loc[stat_data['country'].str.contains('DR Congo'), 'country'] = 'Congo, The Democratic Republic of the'
     stat_data.loc[stat_data['country'].str.contains('Ivory'), 'country'] = 'Côte d\'Ivoire'
     stat_data.loc[stat_data['country'].str.contains('South Korea'), 'country'] = 'Korea, Republic of'
 
-    time_data.loc[time_data['country'].str.contains('China'), 'country'] = 'China'
-    time_data.loc[time_data['country'].str.contains('Brunei'), 'country'] = 'Brunei Darussalam '
-    time_data.loc[time_data['country'].str.contains('DR Congo'), 'country'] = 'Congo, The Democratic Republic of the'
-    time_data.loc[time_data['country'].str.contains('Ivory'), 'country'] = 'Côte d\'Ivoire'
-    time_data.loc[time_data['country'].str.contains('South Korea'), 'country'] = 'Korea, Republic of'
-
-    data = for_altair(stat_data, time_data)
+    data = for_altair(stat_data)
 
     return data
 
@@ -68,6 +61,127 @@ def select_between_dates(data, start_date, end_date):
     return data
 
 
+def prepare_data(results, regions):
+    results['date'] = results['date'].dt.year
+
+    # Create table with number of home wins
+    home_wins_table = results[['home_team', 'winner', 'date', 'tournament']][results.winner == results.home_team]
+    home_wins_table = home_wins_table.groupby(
+        ['home_team',
+         'date',
+         'tournament'])['winner'].count().reset_index(name="home_wins")
+
+    # Create table with number of away wins
+    away_wins_table = results[['away_team', 'winner', 'date', 'tournament']][results.winner == results.away_team]
+    away_wins_table = away_wins_table.groupby(
+        ['away_team',
+         'date',
+         'tournament'])['winner'].count().reset_index(name="away_wins")
+
+    # Create table with number of away draws
+    away_draw_table = results[['away_team', 'winner', 'date', 'tournament']][results.winner == 'draw']
+    away_draw_table = away_draw_table.groupby(
+        ['away_team',
+         'date',
+         'tournament'])['winner'].count().reset_index(name="away_draws")
+
+    # Create table with number of home draws
+    home_draw_table = results[['home_team', 'winner', 'date', 'tournament']][results.winner == 'draw']
+    home_draw_table = home_draw_table.groupby(
+        ['home_team',
+         'date',
+         'tournament'])['winner'].count().reset_index(name="home_draws")
+
+    # Create table with number of away losses
+    away_loss_table = results[['away_team', 'winner', 'date', 'tournament']][
+        (results.winner != 'draw') & (results.winner != results.away_team)]
+    away_loss_table = away_loss_table.groupby(
+        ['away_team',
+         'date',
+         'tournament'])['winner'].count().reset_index(name="away_losses")
+
+    # Create table with number of home losses
+    home_loss_table = results[['home_team', 'winner', 'date', 'tournament']][
+        (results.winner != 'draw') & (results.winner != results.home_team)]
+    home_loss_table = home_loss_table.groupby(
+        ['home_team',
+         'date',
+         'tournament'])['winner'].count().reset_index(name="home_losses")
+
+    # Calculate the number of all games
+    total_games_table = to_history_chart(results)
+
+    # Create the summary table
+    data_home_wins = pd.DataFrame(home_wins_table)
+    data_home_draws = pd.DataFrame(home_draw_table)
+    data_home_losses = pd.DataFrame(home_loss_table)
+    data_home = pd.merge(data_home_wins,
+                         data_home_draws,
+                         how='outer',
+                         on=['home_team', 'date', 'tournament'])
+    data_home = pd.merge(data_home,
+                         data_home_losses,
+                         how='outer',
+                         on=['home_team', 'date', 'tournament'])
+
+    data_home.rename(columns={'home_team': 'country'}, inplace=True)
+
+    data_away_wins = pd.DataFrame(away_wins_table)
+    data_away_draws = pd.DataFrame(away_draw_table)
+    data_away_losses = pd.DataFrame(away_loss_table)
+    data_away = pd.merge(data_away_wins,
+                         data_away_draws,
+                         how='outer',
+                         on=['away_team', 'date', 'tournament'])
+    data_away = pd.merge(data_away,
+                         data_away_losses,
+                         how='outer',
+                         on=['away_team', 'date', 'tournament'])
+
+    data_away.rename(columns={'away_team': 'country'}, inplace=True)
+
+    data = pd.merge(
+        data_home,
+        data_away,
+        how='outer',
+        on=['country', 'date', 'tournament'])
+
+    data = pd.merge(
+        data,
+        total_games_table,
+        how='inner',
+        on=['country', 'date', 'tournament']
+    )
+
+    data.fillna(0, inplace=True)
+    data.sort_values(by=['country', 'date'], inplace=True)
+    data.reset_index(drop=True, inplace=True)
+
+    data.rename(columns={0: 'total_games'}, inplace=True)
+    # We have data for each year, each tournament
+    # Now calculate all the percentages
+    data['percent_wins'] = data.apply(
+        lambda row: ((row.home_wins + row.away_wins) / row.total_games) if row.total_games > 0 else 0,
+        axis=1)
+    data['percent_home_wins'] = data.apply(
+        lambda row: (row.home_wins / (row.home_wins + row.home_draws + row.home_losses))
+        if (row.home_wins + row.home_draws + row.home_losses) > 0
+        else 0,
+        axis=1)
+    data['percent_away_wins'] = data.apply(
+        lambda row: (row.away_wins / (row.away_wins + row.away_draws + row.away_losses))
+        if (row.away_wins + row.away_draws + row.away_losses) > 0
+        else 0,
+        axis=1)
+
+    data_out = pd.merge(data, regions, how='inner', left_on=['country'], right_on=['ShortName'])
+
+    DataLoader.save_to_sql(data_out, "results_assigned")
+
+    return data_out
+
+
+# Bin it
 def assign_victories(data, regions, start_date, end_date):
     """
     This method will create a data frame that assigns number of
@@ -217,6 +331,7 @@ def assign_victories(data, regions, start_date, end_date):
     return results_assigned
 
 
+# Bin it
 def to_history_chart(data):
     """
 
@@ -224,50 +339,73 @@ def to_history_chart(data):
     :return:
     """
 
-    data['date'] = data['date'].dt.year
+    # data['date'] = data['date'].dt.year
 
     # Calculate number of home and away games for each year
-    home_games = pd.crosstab(data.date, data.home_team)
-    away_games = pd.crosstab(data.date, data.away_team)
+    home_games = pd.crosstab(
+        [data.home_team, data.tournament],
+        data.date,
+        rownames=['country', 'tournament'],
+        colnames=['date']
+    )
+
+    away_games = pd.crosstab(
+        [data.away_team, data.tournament],
+        data.date,
+        rownames=['country', 'tournament'],
+        colnames=['date']
+    )
+
+    # home_games.rename(columns={'away_team': 'country'}, inplace=True)
+    # home_games.set_index(['country', 'date'], inplace=True)
+    #
+    # away_games.rename(columns={'away_team': 'country'}, inplace=True)
+    # away_games.set_index(['country', 'date'], inplace=True)
 
     # Add those two values for number of total games per year
     time_stats = home_games.add(away_games, fill_value=0)
 
     # Change to 'classic' dataframe
     time_stats = time_stats.stack().reset_index()
-    time_stats.columns = ['date', 'country', 'games']
 
     return time_stats
 
 
-def for_altair(stat_data, time_data):
+def for_altair(stat_data):
     """
 
     :param stat_data:
     :param time_data:
     :return:
     """
-    print(time_data)
-    print(stat_data)
-
-    # Merge the (x, y) metadata into the long-form view
-    data = pd.merge(time_data, stat_data, on='country')
-
-    for index, row in data.iterrows():
-        country = pycountry.countries.get(name=data.loc[index, 'country'])
+    def country_search(name):
+        country = pycountry.countries.get(name=name)
         if country is not None:
-            data.loc[index, 'CountryCode'] = country.numeric
+            return country.numeric
         else:
-            country = pycountry.countries.search_fuzzy(data.loc[index, 'country'])
-            data.loc[index, 'CountryCode'] = country[0].numeric
+            country = pycountry.countries.search_fuzzy(name)
+            return country[0].numeric
 
-    # data = pd.melt(data, id_vars=["date_x", "country"])
+    print('country loop')
+    stat_data['CountryCode'] = np.vectorize(country_search)(stat_data['country'])
 
-    # print(data)
+    # print('melt')
+    # data = pd.melt(stat_data, id_vars=['country',
+    #                                    'date',
+    #                                    'tournament',
+    #                                    'total_games',
+    #                                    'percent_wins',
+    #                                    'CountryCode',
+    #                                    'home_wins',
+    #                                    'away_wins'],
+    #                value_vars=['percent_home_wins',
+    #                            'percent_away_wins'],
+    #                var_name='statistics',
+    #                value_name='values')
 
-    DataLoader.save_to_sql(data, "final_data")
+    DataLoader.save_to_sql(stat_data, "final_data")
 
-    return data
+    return stat_data
 
 
 def open_geojson(geo_json_file_loc):
@@ -288,7 +426,7 @@ def get_gpd_df(geo_json_file_loc):
     :return:
     """
     toronto_json = open_geojson(geo_json_file_loc)
-    gdf = gpd.GeoDataFrame.from_features((toronto_json))
+    gdf = gpd.GeoDataFrame.from_features(toronto_json)
     return gdf
 
 
@@ -315,7 +453,7 @@ def merge_geodata(data):
     :return:
     """
     gdf = get_geodata()
-    gdf = gdf.merge(data, left_on='name', right_on='country', how='inner')
+    gdf = gdf.merge(data, left_on='iso_a3', right_on='CountryCode', how='inner')
 
     # Convert the geodata to json
     choro_json = json.loads(gdf.to_json())
